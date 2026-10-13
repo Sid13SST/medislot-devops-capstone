@@ -1,0 +1,292 @@
+# MediSlot delivery pipeline
+#
+#   TEST ──► BUILD + TRIVY SCAN + PUSH (GHCR, tag = commit SHA) ──► DEPLOY (Helm → EKS)
+#
+# Every quality gate must pass before an image is pushed, and only pushed images are deployed.
+name: MediSlot CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  AWS_REGION: ap-south-1
+  EKS_CLUSTER_NAME: medislot-eks
+  HELM_VERSION: v4.3.0
+  K8S_NAMESPACE: medislot
+
+jobs:
+  # ───────────────────────────── 1. TEST ─────────────────────────────
+  backend-tests:
+    name: Backend · lint + pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Lint (ruff)
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Run pytest (isolated SQLite test database)
+        run: pytest -v --cov=app --cov-report=term-missing --cov-report=xml --junitxml=pytest-report.xml
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-test-reports
+          path: |
+            backend/pytest-report.xml
+            backend/coverage.xml
+
+  postgres-integration:
+    name: Backend · Alembic + pytest on PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: medislot_ci
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ci -d medislot_ci"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/medislot_ci
+      TEST_DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/medislot_ci
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Migrations upgrade → downgrade → upgrade (proves they are reversible)
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+          alembic current
+      - name: Run pytest against PostgreSQL
+        run: pytest -q
+
+  frontend-build:
+    name: Frontend · test + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+  infra-validate:
+    name: IaC · terraform validate + helm lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+      - name: terraform fmt / init / validate
+        working-directory: terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: helm lint + template
+        run: |
+          helm lint helm/medislot
+          helm lint helm/medislot -f helm/medislot/values-prod.yaml
+          helm template medislot helm/medislot -f helm/medislot/values-prod.yaml > /dev/null
+
+  # ────────────────── 2. BUILD → TRIVY SCAN → PUSH TO GHCR ──────────────────
+  build-scan-push:
+    name: Image · ${{ matrix.service }}
+    needs: [backend-tests, postgres-integration, frontend-build, infra-validate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compute image name (GHCR requires lowercase)
+        id: meta
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "image=${REGISTRY}/${owner}/medislot-${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build image (tagged with the commit SHA, never "latest")
+        uses: docker/build-push-action@v7
+        with:
+          context: ./${{ matrix.service }}
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.image }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      # Security gate: any fixable HIGH/CRITICAL CVE fails the job, so the image is never pushed.
+      - name: Trivy scan (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 (pinned by SHA)
+        with:
+          image-ref: ${{ steps.meta.outputs.image }}:${{ github.sha }}
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          vuln-type: os,library
+          exit-code: "1"
+
+      - name: Trivy report (SARIF, all severities) for the Security tab
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.meta.outputs.image }}:${{ github.sha }}
+          format: sarif
+          output: trivy-${{ matrix.service }}.sarif
+          skip-setup-trivy: true
+          exit-code: "0"
+
+      - name: Upload SARIF to GitHub code scanning
+        if: always() && hashFiles(format('trivy-{0}.sarif', matrix.service)) != ''
+        continue-on-error: true # code scanning is unavailable on some private repositories
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-${{ matrix.service }}.sarif
+          category: trivy-${{ matrix.service }}
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GHCR
+        if: github.event_name != 'pull_request'
+        run: |
+          docker push "${{ steps.meta.outputs.image }}:${{ github.sha }}"
+          {
+            echo "### 📦 ${{ matrix.service }} image pushed"
+            echo '```'
+            echo "${{ steps.meta.outputs.image }}:${{ github.sha }}"
+            echo '```'
+            echo "Trivy gate: **passed** (no fixable HIGH/CRITICAL vulnerabilities)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────── 3. DEPLOY ─────────────────────────────
+  # Runs only on main, and only once the EKS cluster exists and the repository variable
+  # AWS_DEPLOY_ROLE_ARN is set (Terraform output `github_actions_role_arn`). Authentication uses
+  # GitHub OIDC → IAM role, so no long-lived AWS keys are stored in GitHub.
+  deploy:
+    name: Deploy · Helm → EKS
+    needs: build-scan-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.smoke.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl for EKS
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: helm upgrade --install (auto-rollback on failure)
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          kubectl apply -f k8s/namespace.yaml
+          helm upgrade --install medislot ./helm/medislot \
+            --namespace "$K8S_NAMESPACE" \
+            -f helm/medislot/values-prod.yaml \
+            --set backend.image.repository="ghcr.io/${owner}/medislot-backend" \
+            --set backend.image.tag="${GITHUB_SHA}" \
+            --set frontend.image.repository="ghcr.io/${owner}/medislot-frontend" \
+            --set frontend.image.tag="${GITHUB_SHA}" \
+            --set postgres.auth.password="${{ secrets.POSTGRES_PASSWORD || 'medislot-change-me' }}" \
+            --rollback-on-failure --timeout 10m
+          helm list -n "$K8S_NAMESPACE"
+          kubectl get pods,svc,ingress,hpa -n "$K8S_NAMESPACE"
+
+      - name: Smoke test through the Ingress (verifies the new commit is live)
+        id: smoke
+        run: |
+          host=""
+          for i in $(seq 1 30); do
+            host=$(kubectl get svc -n ingress-nginx ingress-nginx-controller \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+            [ -n "$host" ] && break
+            sleep 10
+          done
+          echo "url=http://${host}" >> "$GITHUB_OUTPUT"
+          for i in $(seq 1 30); do
+            sha=$(curl -fsS "http://${host}/api/info" | jq -r .gitSha || true)
+            if [ "$sha" = "$GITHUB_SHA" ]; then
+              echo "✅ http://${host} is serving commit ${sha}" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "waiting for new build (currently: ${sha:-unreachable})"; sleep 10
+          done
+          echo "Deployed build did not become reachable through the Ingress" >&2
+          exit 1
