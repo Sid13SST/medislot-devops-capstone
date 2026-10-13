@@ -1,0 +1,49 @@
+# Rendered at container start by the nginx image's envsubst step:
+#   /etc/nginx/templates/default.conf.template -> /etc/nginx/conf.d/default.conf
+# ${BACKEND_URL} is the backend address: http://backend:8000 in Docker Compose,
+# http://<release>-medislot-backend:8000 in Kubernetes (set by the Helm chart).
+
+server {
+  listen 8080;
+  server_name _;
+  root /usr/share/nginx/html;
+  index index.html;
+
+  server_tokens off;
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header X-Frame-Options "DENY" always;
+  add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+  gzip on;
+  gzip_types text/css application/javascript application/json image/svg+xml;
+
+  # Vite emits content-hashed file names, so assets can be cached aggressively.
+  location /assets/ {
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+  }
+
+  # SPA fallback: unknown paths are handled by React.
+  location / {
+    try_files $uri $uri/ /index.html;
+    add_header Cache-Control "no-cache";
+  }
+
+  # Same-origin API proxy, so the browser never needs the backend hostname.
+  location /api/ {
+    proxy_pass ${BACKEND_URL};
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 30s;
+  }
+
+  # Lightweight probe endpoint for the frontend container itself.
+  location = /healthz {
+    access_log off;
+    default_type text/plain;
+    return 200 "ok\n";
+  }
+}
