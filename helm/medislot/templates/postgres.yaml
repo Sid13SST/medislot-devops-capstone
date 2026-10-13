@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "medislot.postgresName" . }}
+  labels:
+    {{- include "medislot.componentLabels" (dict "ctx" . "component" "database") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "medislot.selectorLabels" (dict "ctx" . "component" "database") | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "medislot.postgresName" . }}
+  labels:
+    {{- include "medislot.componentLabels" (dict "ctx" . "component" "database") | nindent 4 }}
+spec:
+  serviceName: {{ include "medislot.postgresName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "medislot.selectorLabels" (dict "ctx" . "component" "database") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "medislot.componentLabels" (dict "ctx" . "component" "database") | nindent 8 }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/db-secret.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70       # "postgres" user in the alpine image
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom: {secretKeyRef: {name: {{ include "medislot.dbSecretName" . }}, key: postgres-database}}
+            - name: POSTGRES_USER
+              valueFrom: {secretKeyRef: {name: {{ include "medislot.dbSecretName" . }}, key: postgres-user}}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ include "medislot.dbSecretName" . }}, key: postgres-password}}
+            # Use a sub-directory: a fresh EBS volume contains "lost+found", which initdb refuses.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+      volumes:
+        - name: run
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "medislot.selectorLabels" (dict "ctx" . "component" "database") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.postgres.persistence.storageClassName }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.persistence.size }}

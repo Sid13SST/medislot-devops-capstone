@@ -1,0 +1,32 @@
+# Local cluster (minikube / kind / Docker Desktop) using images built on your machine:
+#   minikube image build -t medislot-backend:local ./backend
+#   minikube image build -t medislot-frontend:local ./frontend
+#   helm upgrade --install medislot ./helm/medislot -n medislot -f helm/medislot/values-dev.yaml
+environment: development
+
+backend:
+  image:
+    repository: medislot-backend
+    tag: local
+    pullPolicy: IfNotPresent
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+
+frontend:
+  image:
+    repository: medislot-frontend
+    tag: local
+    pullPolicy: IfNotPresent
+
+postgres:
+  auth:
+    password: medislot-dev
+  persistence:
+    size: 1Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  host: medislot.local   # add "<minikube ip> medislot.local" to your hosts file

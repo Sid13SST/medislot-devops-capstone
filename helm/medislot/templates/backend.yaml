@@ -1,0 +1,137 @@
+{{- $b := .Values.backend -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "medislot.backendName" . }}
+  labels:
+    {{- include "medislot.componentLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+spec:
+  {{- if not $b.autoscaling.enabled }}
+  replicas: {{ $b.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}   # zero-downtime rollouts
+  selector:
+    matchLabels:
+      {{- include "medislot.selectorLabels" (dict "ctx" . "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "medislot.componentLabels" (dict "ctx" . "component" "backend") | nindent 8 }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/db-secret.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: backend
+          image: {{ include "medislot.image" (dict "image" $b.image "ctx" .) | quote }}
+          imagePullPolicy: {{ $b.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+            readOnlyRootFilesystem: true
+          ports:
+            - name: http
+              containerPort: {{ $b.port }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "medislot.dbSecretName" . }}
+                  key: database-url
+            - name: GIT_SHA
+              value: {{ default .Chart.AppVersion $b.image.tag | toString | quote }}
+            - name: ENVIRONMENT
+              value: {{ .Values.environment | quote }}
+            - name: CLINIC_TIMEZONE
+              value: {{ .Values.clinicTimezone | quote }}
+          # Start-up covers "wait for PostgreSQL + run Alembic migrations" before the other probes begin.
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:     # "can I take traffic?" — checks the database
+            httpGet: {path: /ready, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:      # "is the process alive?" — cheap, no database
+            httpGet: {path: /health, port: http}
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 4
+          resources:
+            {{- toYaml $b.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "medislot.backendName" . }}
+  labels:
+    {{- include "medislot.componentLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "medislot.selectorLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+  ports:
+    - name: http          # referenced by the ServiceMonitor
+      port: {{ $b.port }}
+      targetPort: http
+{{- if $b.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "medislot.backendName" . }}
+  labels:
+    {{- include "medislot.componentLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "medislot.backendName" . }}
+  minReplicas: {{ $b.autoscaling.minReplicas }}
+  maxReplicas: {{ $b.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $b.autoscaling.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies: [{type: Pods, value: 2, periodSeconds: 30}]
+    scaleDown:
+      stabilizationWindowSeconds: 120   # short enough to watch it scale back down in a demo
+      policies: [{type: Pods, value: 1, periodSeconds: 60}]
+{{- end }}
+{{- with $b.podDisruptionBudget }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "medislot.backendName" $ }}
+  labels:
+    {{- include "medislot.componentLabels" (dict "ctx" $ "component" "backend") | nindent 4 }}
+spec:
+  minAvailable: {{ .minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "medislot.selectorLabels" (dict "ctx" $ "component" "backend") | nindent 6 }}
+{{- end }}

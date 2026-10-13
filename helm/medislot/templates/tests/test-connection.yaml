@@ -1,0 +1,29 @@
+# `helm test medislot -n medislot` — verifies the backend is reachable and connected to PostgreSQL,
+# and that the frontend serves the app.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "medislot.fullname" . }}-test-connection
+  labels:
+    {{- include "medislot.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+    runAsUser: 65534
+  containers:
+    - name: smoke
+      image: busybox:1.37
+      securityContext:
+        {{- toYaml .Values.containerSecurityContext | nindent 8 }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          wget -qO- http://{{ include "medislot.backendName" . }}:{{ .Values.backend.port }}/ready
+          wget -qO- http://{{ include "medislot.backendName" . }}:{{ .Values.backend.port }}/api/doctors > /dev/null
+          wget -qO- http://{{ include "medislot.frontendName" . }}/ | grep -q MediSlot
+          echo "MediSlot smoke test passed"

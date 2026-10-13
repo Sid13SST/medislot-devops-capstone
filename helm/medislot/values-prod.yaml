@@ -1,0 +1,23 @@
+# AWS EKS (provisioned by ../../terraform). Image repository/tag are set by the CI deploy job:
+#   --set backend.image.tag=<git sha> --set frontend.image.tag=<git sha>
+environment: production
+
+backend:
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 60
+
+frontend:
+  replicaCount: 2
+
+postgres:
+  persistence:
+    size: 5Gi
+    storageClassName: gp3   # created by k8s/storageclass-gp3.yaml (EBS CSI driver)
+
+ingress:
+  enabled: true
+  className: nginx
+  host: ""   # served on the load balancer's DNS name; set a real domain here if you have one

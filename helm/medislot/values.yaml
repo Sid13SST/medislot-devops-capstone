@@ -1,0 +1,90 @@
+# Default values for the MediSlot chart.
+# Environment overlays: values-dev.yaml (minikube / kind) and values-prod.yaml (AWS EKS).
+
+environment: production
+clinicTimezone: Asia/Kolkata
+
+# Needed only if the GHCR packages are private, e.g. [{name: ghcr-pull}]
+imagePullSecrets: []
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+# ─────────────────────────── Backend (FastAPI) ───────────────────────────
+backend:
+  image:
+    repository: ghcr.io/sid13sst/medislot-backend
+    tag: ""            # CI sets this to the Git commit SHA; falls back to the chart appVersion
+    pullPolicy: IfNotPresent
+  replicaCount: 2      # used only when autoscaling is disabled
+  port: 8000
+  resources:           # requests are required for CPU-based HPA
+    requests: {cpu: 100m, memory: 160Mi}
+    limits: {cpu: 500m, memory: 384Mi}
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 60
+  podDisruptionBudget:
+    minAvailable: 1
+
+# ─────────────────────────── Frontend (React + Nginx) ───────────────────────────
+frontend:
+  image:
+    repository: ghcr.io/sid13sst/medislot-frontend
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  port: 8080
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {cpu: 200m, memory: 128Mi}
+  podDisruptionBudget:
+    minAvailable: 1
+
+# ─────────────────────────── PostgreSQL (in-cluster StatefulSet) ───────────────────────────
+# Fine for the classroom. In production you would usually point the backend at Amazon RDS instead.
+postgres:
+  image: postgres:17-alpine
+  auth:
+    database: medislot
+    username: medislot
+    password: ""       # set with --set postgres.auth.password=... ; a random one is generated if empty
+  persistence:
+    size: 5Gi
+    storageClassName: ""   # "" = cluster default StorageClass
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+# ─────────────────────────── Ingress ───────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  host: ""             # empty = match any host (e.g. the AWS load balancer DNS name)
+  annotations: {}
+  # Paths routed straight to FastAPI; everything else goes to the React frontend.
+  backendPaths:
+    - /api
+    - /docs
+    - /openapi.json
+  tls: []
+
+# ─────────────────────────── Monitoring ───────────────────────────
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+    # kube-prometheus-stack selects ServiceMonitors carrying its release label.
+    labels:
+      release: kube-prometheus-stack
+  grafanaDashboard:
+    enabled: true

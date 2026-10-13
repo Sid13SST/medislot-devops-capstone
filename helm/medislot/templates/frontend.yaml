@@ -1,0 +1,81 @@
+{{- $f := .Values.frontend -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "medislot.frontendName" . }}
+  labels:
+    {{- include "medislot.componentLabels" (dict "ctx" . "component" "frontend") | nindent 4 }}
+spec:
+  replicas: {{ $f.replicaCount }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+  selector:
+    matchLabels:
+      {{- include "medislot.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "medislot.componentLabels" (dict "ctx" . "component" "frontend") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        runAsUser: 101      # "nginx" user of nginx-unprivileged
+        runAsGroup: 101
+      containers:
+        - name: frontend
+          image: {{ include "medislot.image" (dict "image" $f.image "ctx" .) | quote }}
+          imagePullPolicy: {{ $f.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            # Nginx proxies same-origin /api calls to this in-cluster Service (used when the
+            # frontend is reached without the Ingress, e.g. `kubectl port-forward`).
+            - name: BACKEND_URL
+              value: "http://{{ include "medislot.backendName" . }}:{{ .Values.backend.port }}"
+          ports:
+            - name: http
+              containerPort: {{ $f.port }}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml $f.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "medislot.frontendName" . }}
+  labels:
+    {{- include "medislot.componentLabels" (dict "ctx" . "component" "frontend") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "medislot.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- with $f.podDisruptionBudget }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "medislot.frontendName" $ }}
+  labels:
+    {{- include "medislot.componentLabels" (dict "ctx" $ "component" "frontend") | nindent 4 }}
+spec:
+  minAvailable: {{ .minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "medislot.selectorLabels" (dict "ctx" $ "component" "frontend") | nindent 6 }}
+{{- end }}
