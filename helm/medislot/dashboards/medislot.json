@@ -1,6 +1,6 @@
 {
   "uid": "medislot-overview",
-  "title": "MediSlot \u00b7 Application Overview",
+  "title": "MediSlot · Application Overview",
   "tags": [
     "medislot",
     "fastapi",
@@ -213,7 +213,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "100 * sum(rate(http_requests_total{namespace=\"$namespace\", status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_total{namespace=\"$namespace\"}[5m])), 1e-9)"
+          "expr": "100 * (sum(rate(http_requests_total{namespace=\"$namespace\", status=~\"5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(http_requests_total{namespace=\"$namespace\"}[5m])), 1e-9)"
         }
       ]
     },
@@ -607,7 +607,7 @@
     {
       "id": 11,
       "type": "timeseries",
-      "title": "Backend CPU per pod (cores) \u2014 drives the HPA",
+      "title": "Backend CPU per pod (cores) — drives the HPA",
       "description": "CPU usage from cAdvisor; the HPA targets 60% of the 100m request.",
       "datasource": {
         "type": "prometheus",
