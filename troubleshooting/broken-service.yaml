@@ -1,0 +1,19 @@
+# LAB 2 — Service with no endpoints
+# The selector says component "api", but the backend Pods are labelled component "backend".
+# The Service exists and has a ClusterIP, yet traffic goes nowhere.
+#   kubectl apply -f troubleshooting/broken-service.yaml
+#   kubectl get endpointslices -n medislot -l kubernetes.io/service-name=lab-broken-service   # no endpoints
+#   kubectl get pods -n medislot --show-labels
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab-broken-service
+  namespace: medislot
+spec:
+  selector:
+    app.kubernetes.io/name: medislot
+    app.kubernetes.io/component: api        # ← the bug: should be "backend"
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

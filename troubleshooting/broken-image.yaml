@@ -1,0 +1,29 @@
+# LAB 1 — ImagePullBackOff
+# The tag below was never pushed to GHCR. Pods stay in ErrImagePull / ImagePullBackOff.
+#   kubectl apply -f troubleshooting/broken-image.yaml
+#   kubectl get pods -n medislot -l lab=broken-image
+#   kubectl describe pod -n medislot -l lab=broken-image      # Events: "manifest unknown" / "not found"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab-broken-image
+  namespace: medislot
+  labels: {lab: broken-image}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {lab: broken-image}
+  template:
+    metadata:
+      labels: {lab: broken-image}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: backend
+          image: ghcr.io/sid13sst/medislot-backend:this-tag-does-not-exist   # ← the bug
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}

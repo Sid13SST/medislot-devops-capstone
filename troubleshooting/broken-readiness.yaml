@@ -1,0 +1,34 @@
+# LAB 3 — Running but never Ready
+# The container listens on 8080 (unprivileged Nginx), but the readiness probe checks port 80.
+# The Pod is "Running" with READY 0/1, so its Service never sends it traffic.
+#   kubectl apply -f troubleshooting/broken-readiness.yaml
+#   kubectl get pods -n medislot -l lab=broken-readiness          # READY 0/1
+#   kubectl describe pod -n medislot -l lab=broken-readiness      # "Readiness probe failed: connection refused"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab-broken-readiness
+  namespace: medislot
+  labels: {lab: broken-readiness}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {lab: broken-readiness}
+  template:
+    metadata:
+      labels: {lab: broken-readiness}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: web
+          image: nginxinc/nginx-unprivileged:1.29-alpine
+          ports: [{containerPort: 8080}]
+          readinessProbe:
+            httpGet: {path: /, port: 80}          # ← the bug: should be 8080
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
