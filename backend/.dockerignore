@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+*.db
+.env
+tests/
+requirements-dev.txt
+ruff.toml
+pytest.ini
+Dockerfile
+.dockerignore
