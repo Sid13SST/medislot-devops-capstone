@@ -1,0 +1,10 @@
+.git
+.github
+terraform
+helm
+k8s
+monitoring
+docs
+**/node_modules
+**/.venv
+**/__pycache__

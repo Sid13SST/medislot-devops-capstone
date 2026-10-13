@@ -1,0 +1,50 @@
+# Full local stack:  docker compose up --build   ->  http://localhost:3000
+name: medislot
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-medislot}
+      POSTGRES_USER: ${POSTGRES_USER:-medislot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medislot}
+    ports:
+      # Override POSTGRES_HOST_PORT if 5432 is already in use on your machine.
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: ./backend
+    image: medislot-backend:local
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-medislot}:${POSTGRES_PASSWORD:-medislot}@postgres:5432/${POSTGRES_DB:-medislot}
+      ENVIRONMENT: docker-compose
+      GIT_SHA: ${GIT_SHA:-local}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    image: medislot-frontend:local
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:8080"
+
+volumes:
+  postgres-data:
