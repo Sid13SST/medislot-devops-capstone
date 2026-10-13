@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars and adjust. terraform.tfvars is git-ignored.
+# AWS credentials are NEVER put here — use `aws configure` / `aws sso login` / environment variables.
+
+aws_region   = "ap-south-1"
+project_name = "medislot"
+environment  = "dev"
+owner        = "siddhant-prasad"
+
+cluster_name       = "medislot-eks"
+kubernetes_version = "1.35"
+
+node_instance_types = ["t3.large"]
+node_min_size       = 2
+node_desired_size   = 2
+node_max_size       = 4
+
+# GitHub repository allowed to deploy through OIDC (enables the CI "deploy" job).
+github_repository = "your-github-username/medislot-devops-capstone"
+
+# Set to false if this AWS account already has the token.actions.githubusercontent.com OIDC provider.
+create_github_oidc_provider = true
