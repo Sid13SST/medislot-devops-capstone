@@ -11,7 +11,8 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt .
 RUN pip install --upgrade pip \
- && pip install -r requirements.txt
+ && pip install -r requirements.txt \
+ && pip uninstall -y pip
 
 # ---------- Stage 2: minimal runtime ----------
 FROM python:3.12-slim AS runtime
@@ -22,15 +23,15 @@ LABEL org.opencontainers.image.title="medislot-backend" \
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PATH="/opt/venv/bin:$PATH"
 
-# Patch OS packages (keeps the Trivy gate green) and create an unprivileged user.
+# Patch OS packages and remove pip/ensurepip: the app never installs anything at runtime, and pip's
+# vendored libraries (urllib3, msgpack, ...) were the only HIGH findings in the Trivy scan.
 RUN apt-get update \
  && apt-get upgrade -y \
  && rm -rf /var/lib/apt/lists/* \
- && pip install --upgrade pip \
+ && python -m pip uninstall -y pip \
+ && rm -rf /usr/local/lib/python3.12/ensurepip /usr/local/bin/pip* \
  && groupadd --gid 10001 app \
  && useradd --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app
 
