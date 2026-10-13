@@ -1,0 +1,51 @@
+# Values for prometheus-community/kube-prometheus-stack (Prometheus Operator + Prometheus + Grafana).
+#   helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+#     --version 92.3.1 -n monitoring --create-namespace -f monitoring/kube-prometheus-stack-values.yaml
+
+# Not needed for the capstone; disabling it saves pods/memory on small nodes.
+alertmanager:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    # Discover ServiceMonitors from every namespace, regardless of their labels
+    # (the MediSlot chart still adds release=kube-prometheus-stack for clarity).
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+    podMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelector: {}
+    podMonitorNamespaceSelector: {}
+    scrapeInterval: 15s
+    retention: 3d
+    resources:
+      requests: {cpu: 200m, memory: 512Mi}
+      limits: {memory: 1Gi}
+
+grafana:
+  enabled: true
+  # The admin password is generated into the Secret "kube-prometheus-stack-grafana":
+  #   kubectl get secret -n monitoring kube-prometheus-stack-grafana -o jsonpath="{.data.admin-password}" | base64 -d
+  defaultDashboardsTimezone: browser
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL           # pick up the MediSlot dashboard ConfigMap from the app namespace
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
+  service:
+    type: ClusterIP                  # use: kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3001:80
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 384Mi}
+
+kube-state-metrics:
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+
+prometheus-node-exporter:
+  resources:
+    requests: {cpu: 20m, memory: 32Mi}
