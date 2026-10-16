@@ -75,6 +75,10 @@ module "eks" {
       instance_types = var.node_instance_types
       capacity_type  = "ON_DEMAND"
 
+      # Let EKS pick the latest AMI release for the Kubernetes version when the node group is
+      # created, instead of Terraform reading it from SSM Parameter Store on every plan.
+      use_latest_ami_release_version = false
+
       min_size     = var.node_min_size
       desired_size = var.node_desired_size
       max_size     = var.node_max_size

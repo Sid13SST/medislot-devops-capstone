@@ -40,6 +40,17 @@ variable "az_count" {
   }
 }
 
+variable "availability_zones" {
+  description = "Explicit availability zones to use. Leave empty to look them up (needs ec2:DescribeAvailabilityZones)."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = length(var.availability_zones) == 0 || length(var.availability_zones) >= 2
+    error_message = "Provide at least two availability zones, or leave the list empty."
+  }
+}
+
 # ---------- EKS ----------
 variable "cluster_name" {
   description = "EKS cluster name (also used by the CI deploy job)."

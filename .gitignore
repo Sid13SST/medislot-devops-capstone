@@ -40,3 +40,7 @@ helm/**/charts/*.tgz
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Saved Terraform plans
+tfplan
+*.tfplan

@@ -9,6 +9,8 @@ provider "aws" {
 }
 
 data "aws_availability_zones" "available" {
+  count = length(var.availability_zones) == 0 ? 1 : 0
+
   state = "available"
 
   filter {
@@ -20,7 +22,10 @@ data "aws_availability_zones" "available" {
 data "aws_caller_identity" "current" {}
 
 locals {
-  azs = slice(data.aws_availability_zones.available.names, 0, var.az_count)
+  azs = slice(
+    length(var.availability_zones) > 0 ? var.availability_zones : data.aws_availability_zones.available[0].names,
+    0, var.az_count
+  )
 
   tags = {
     Project     = var.project_name
