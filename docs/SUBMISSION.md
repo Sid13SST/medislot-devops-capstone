@@ -93,7 +93,13 @@ screenshot. Save screenshots in `docs/screenshots/` using the file names below.
 | `terraform destroy` clean | ☁️ use `scripts/teardown-aws.sh` |
 | `terraform.tfvars.example`, no credentials | ✅ |
 
-📸 `m7-plan.png`: `terraform plan` (the summary line `Plan: N to add`)
+> **Status at submission:** `terraform plan` ran against a real AWS account (`Plan: 64 to add, 0 to change,
+> 0 to destroy`). `terraform apply` could not be run: every AWS account available to me sits inside an AWS
+> Organization whose Service Control Policy explicitly denies EC2, EKS and SSM, so no VPC/EKS could be
+> created (and therefore nothing to destroy). The Kubernetes, Helm, Ingress, HPA and monitoring layers were
+> verified end-to-end on a local minikube cluster instead (M8/M9 screenshots).
+
+📸 `m7-plan.png`: `terraform plan` (the summary line `Plan: N to add`) · `m7-validate.png`: fmt + validate
 📸 `m7-aws-vpc.png`, `m7-aws-eks.png`: AWS Console, region **Asia Pacific (Mumbai) ap-south-1**
 📸 `m7-destroy.png`: `Destroy complete! Resources: N destroyed.`
 
