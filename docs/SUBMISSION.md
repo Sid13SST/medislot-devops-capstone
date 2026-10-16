@@ -93,15 +93,18 @@ screenshot. Save screenshots in `docs/screenshots/` using the file names below.
 | `terraform destroy` clean | ☁️ use `scripts/teardown-aws.sh` |
 | `terraform.tfvars.example`, no credentials | ✅ |
 
-> **Status at submission:** `terraform plan` ran against a real AWS account (`Plan: 64 to add, 0 to change,
-> 0 to destroy`). `terraform apply` could not be run: every AWS account available to me sits inside an AWS
-> Organization whose Service Control Policy explicitly denies EC2, EKS and SSM, so no VPC/EKS could be
-> created (and therefore nothing to destroy). The Kubernetes, Helm, Ingress, HPA and monitoring layers were
-> verified end-to-end on a local minikube cluster instead (M8/M9 screenshots).
+> **Status at submission:** provisioned for real on AWS (account in ap-south-1, 16 Oct 2026):
+> `terraform plan` → 64 to add, `terraform apply` created the VPC (10.30.0.0/16, 2 public + 2 private
+> subnets, NAT) and EKS 1.35 with a 2-node managed node group. MediSlot was deployed with Helm
+> (revision 2, `deployed`) and served through ingress-nginx — the UI footer shows build `e3defe3 · production`.
+> The new account was not yet allowed to create load balancers (`OperationNotPermitted`), so the app was
+> reached through `kubectl port-forward` to the ingress controller instead of an NLB hostname. The EBS CSI
+> driver could not reach node credentials (IMDS hop limit), so it was given an EKS Pod Identity role during the
+> session. Everything was removed with `scripts/teardown-aws.sh` afterwards.
 
-📸 `m7-plan.png`: `terraform plan` (the summary line `Plan: N to add`) · `m7-validate.png`: fmt + validate
-📸 `m7-aws-vpc.png`, `m7-aws-eks.png`: AWS Console, region **Asia Pacific (Mumbai) ap-south-1**
-📸 `m7-destroy.png`: `Destroy complete! Resources: N destroyed.`
+📸 `m7-aws-eks.png`: `aws eks describe-cluster` / `describe-nodegroup` (ACTIVE) · `m7-aws-vpc.png`: `aws ec2 describe-vpcs` / `describe-subnets` in ap-south-1
+📸 `m7-eks-nodes-pods.png`: `kubectl get nodes,pods` on EKS · `m8-eks-browser.png`, `m8-eks-helm.png`: app + Helm release on EKS
+📸 `m7-plan.png`: `terraform plan` (`Plan: 64 to add`) · `m7-validate.png`: fmt + validate · `m7-destroy.png`: `Destroy complete!`
 
 ## M8: Kubernetes + Helm (15)
 
