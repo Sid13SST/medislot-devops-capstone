@@ -143,6 +143,8 @@ screenshot. Save screenshots in `docs/screenshots/` using the file names below.
 |---|---|
 | Root `README.md` | ✅ |
 | Live demo: commit → pipeline → deployment updates | Script in [DEMO.md](DEMO.md); the UI footer shows the commit SHA, so the update is visible |
+| Slide deck | [`demo/MediSlot-presentation.pptx`](../demo/MediSlot-presentation.pptx) |
+| Demo video | [`demo/MediSlot-walkthrough.mp4`](../demo/MediSlot-walkthrough.mp4) |
 
 ---
 

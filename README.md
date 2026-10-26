@@ -104,7 +104,8 @@ the backend Service and everything else to the frontend Service.
 ├── monitoring/                  kube-prometheus-stack and ingress-nginx values
 ├── troubleshooting/             3 broken-on-purpose manifests + RUNBOOK.md
 ├── scripts/                     bootstrap-cluster.sh, load-test.sh, teardown-aws.sh, seed_demo_data.py
-└── docs/                        SUBMISSION.md (rubric → evidence), TRIVY.md, DEMO.md
+├── docs/                        SUBMISSION.md (rubric → evidence), TRIVY.md, DEMO.md
+└── demo/                        MediSlot-presentation.pptx (slide deck) + MediSlot-walkthrough.mp4 (demo video)
 ```
 
 ## 4. Run it locally (Docker Compose)
